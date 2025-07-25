@@ -54,8 +54,8 @@ export const FunctionDialog: React.FC<FunctionDialogProps> = ({ onExecute, resul
         {(result || error) && (
           <div className="mt-4 p-4 bg-muted rounded-md">
             <h4 className="font-semibold">Result:</h4>
-            {result && <pre className="text-sm text-green-600">{result}</pre>}
-            {error && <pre className="text-sm text-red-600">{error}</pre>}
+            {result && <pre className="text-sm text-green-600 whitespace-pre-wrap">{result}</pre>}
+            {error && <pre className="text-sm text-red-600 whitespace-pre-wrap">{error}</pre>}
           </div>
         )}
         <div className="mt-4 p-4 bg-muted rounded-md">

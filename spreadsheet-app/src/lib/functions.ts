@@ -27,17 +27,20 @@ interface CellData {
     return label;
   };
   
-  const parseArgs = (args: string): (string | number)[] => {
-    return args.split(',').map(arg => {
+  const parseArgs = (argsString: string): (string | number)[] => {
+    if (argsString.trim() === '') return [];
+    // This regex splits by comma, but respects commas inside quotes.
+    const regex = /(".*?"|'.*?'|[^,]+)/g;
+    const matches = argsString.match(regex);
+    if (!matches) return [];
+  
+    return matches.map(arg => {
       const trimmed = arg.trim();
-      if (!isNaN(Number(trimmed))) {
+      if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+        return trimmed.slice(1, -1);
+      }
+      if (!isNaN(Number(trimmed)) && trimmed !== '') {
         return Number(trimmed);
-      }
-      if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
-        return trimmed.slice(1, -1);
-      }
-      if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
-        return trimmed.slice(1, -1);
       }
       return trimmed;
     });
@@ -49,15 +52,59 @@ interface CellData {
     rows: number,
     columns: number,
     columnLabels: string[]
-  ): { newData: SpreadsheetData; newRows: number; newColumns: number; newColumnLabels: string[]; result: string | null } => {
-    const match = command.match(/(\w+)\((.*)\)/);
-    if (!match) {
-      throw new Error("Invalid function syntax. Expected format: functionName(arg1, arg2, ...)");
+  ): { newData: SpreadsheetData; newRows: number; newColumns: number; newColumnLabels:string[]; result: string | null } => {
+    // This regex finds all function calls, which can be separated by commas.
+    const commands = command.match(/\w+\([^)]*\)/g);
+    if (!commands) {
+      throw new Error("Invalid function syntax. No valid function calls found. Ensure functions are in the format function_name(arg1, arg2) and separated by commas.");
     }
   
-    const functionName = match[1];
-    const args = parseArgs(match[2]);
+    let currentData = { ...data };
+    let currentRows = rows;
+    let currentColumns = columns;
+    let currentColumnLabels = [...columnLabels];
+    let finalResult = '';
   
+    for (const cmd of commands) {
+      const match = cmd.match(/(\w+)\((.*)\)/);
+      if (!match) {
+        // This should not happen if the previous regex is correct
+        throw new Error(`Invalid function syntax in "${cmd}".`);
+      }
+  
+      const functionName = match[1];
+      const argsString = match[2];
+      const args = parseArgs(argsString);
+  
+      const result = executeSingleFunction(
+        functionName,
+        args,
+        currentData,
+        currentRows,
+        currentColumns,
+        currentColumnLabels
+      );
+  
+      currentData = result.newData;
+      currentRows = result.newRows;
+      currentColumns = result.newColumns;
+      currentColumnLabels = result.newColumnLabels;
+      if (result.result) {
+        finalResult += `${cmd}: ${result.result}\n`;
+      }
+    }
+  
+    return { newData: currentData, newRows: currentRows, newColumns: currentColumns, newColumnLabels: currentColumnLabels, result: finalResult };
+  };
+  
+  const executeSingleFunction = (
+    functionName: string,
+    args: (string | number)[],
+    data: SpreadsheetData,
+    rows: number,
+    columns: number,
+    columnLabels: string[]
+  ): { newData: SpreadsheetData; newRows: number; newColumns: number; newColumnLabels: string[]; result: string | null } => {
     let newData = { ...data };
     let newRows = rows;
     let newColumns = columns;
@@ -356,4 +403,4 @@ interface CellData {
     }
   
     return { newData, newRows, newColumns, newColumnLabels, result };
-  };
+  }
