@@ -2,3 +2,6 @@
 
 5:10 - 5:40 - Fixing UI and adding features.
 
+7:00 - Done UI
+
+7:00 - Starting Backend

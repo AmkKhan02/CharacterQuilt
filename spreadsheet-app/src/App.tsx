@@ -16,9 +16,12 @@ import {
   MoreHorizontal,
   Smile,
   Paperclip,
-  Filter
+  Filter,
+  HelpCircle
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { FunctionDialog } from "@/components/FunctionDialog"
+import { executeFunction } from "@/lib/functions"
 import {
   Dialog,
   DialogContent,
@@ -103,9 +106,36 @@ const SpreadsheetUI = () => {
   ])
   const [inputMessage, setInputMessage] = useState('')
   const [isChatOpen, setIsChatOpen] = useState(true)
+  const [functionResult, setFunctionResult] = useState<string | null>(null)
+  const [functionError, setFunctionError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleExecuteFunction = (command: string) => {
+    try {
+      const { newData, newRows, newColumns, newColumnLabels, result } = executeFunction(
+        command,
+        data,
+        rows,
+        columns,
+        columnLabels
+      )
+      setData(newData)
+      setRows(newRows)
+      setColumns(newColumns)
+      setColumnLabels(newColumnLabels)
+      setFunctionResult(result)
+      setFunctionError(null)
+    } catch (error) {
+      if (error instanceof Error) {
+        setFunctionError(error.message)
+      } else {
+        setFunctionError("An unknown error occurred.")
+      }
+      setFunctionResult(null)
+    }
+  }
 
   useEffect(() => {
     if (selectedCell && inputRefs.current[selectedCell]) {
@@ -445,6 +475,11 @@ const SpreadsheetUI = () => {
               columns={columnLabels}
               onApplyFilter={(filter) => setFilters(prev => [...prev, filter])}
               onClearFilters={() => setFilters([])}
+            />
+            <FunctionDialog
+              onExecute={handleExecuteFunction}
+              result={functionResult}
+              error={functionError}
             />
             <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
               Import CSV
