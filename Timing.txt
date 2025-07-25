@@ -1,0 +1,4 @@
+5:55 - 5:10 Setting up initial UI and downloading packages
+
+5:10 - 5:40 - Fixing UI and adding features.
+
