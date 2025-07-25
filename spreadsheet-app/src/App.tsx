@@ -16,8 +16,6 @@ import {
   MoreHorizontal,
   Smile,
   Paperclip,
-  Sun,
-  Moon,
   Filter
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -43,7 +41,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
-import { ModeToggle } from "./components/theme-toggle"
+import Papa from "papaparse"
 
 interface CellData {
   value: string
@@ -106,6 +104,14 @@ const SpreadsheetUI = () => {
   const [inputMessage, setInputMessage] = useState('')
   const [isChatOpen, setIsChatOpen] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const inputRefs = useRef<Record<string, HTMLInputElement | null>>({})
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (selectedCell && inputRefs.current[selectedCell]) {
+      inputRefs.current[selectedCell]?.focus()
+    }
+  }, [selectedCell])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -119,34 +125,34 @@ const SpreadsheetUI = () => {
     return `${columnLabels[col]}${row + 1}`
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (!selectedCell) return
+  const handleCellKeyDown = (e: React.KeyboardEvent, cellKey: string) => {
+    const [colChar, rowStr] = cellKey.match(/^([A-Z]+)(\d+)$/)?.slice(1) || []
+    if (!colChar || !rowStr) return;
 
-    const [colChar, rowStr] = selectedCell.match(/^([A-Z]+)(\d+)$/)?.slice(1) || []
     const rowIndex = parseInt(rowStr) - 1
     const colIndex = columnLabels.indexOf(colChar)
 
     let nextRow = rowIndex
     let nextCol = colIndex
-
-    switch (e.key) {
-      case "ArrowUp":
-        nextRow = Math.max(0, rowIndex - 1)
-        break
-      case "ArrowDown":
-        nextRow = Math.min(rows - 1, rowIndex + 1)
-        break
-      case "ArrowLeft":
-        nextCol = Math.max(0, colIndex - 1)
-        break
-      case "ArrowRight":
-        nextCol = Math.min(columns - 1, colIndex + 1)
-        break
-      default:
-        return
+    
+    if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "Enter") {
+        e.preventDefault();
+        if (e.key === "ArrowUp") nextRow = Math.max(0, rowIndex - 1);
+        if (e.key === "ArrowDown" || e.key === "Enter") nextRow = Math.min(rows - 1, rowIndex + 1);
+        setSelectedCell(getCellKey(nextRow, colIndex));
+    } else if (e.key === "ArrowLeft") {
+        if ((e.target as HTMLInputElement).selectionStart === 0) {
+            e.preventDefault();
+            nextCol = Math.max(0, colIndex - 1);
+            setSelectedCell(getCellKey(rowIndex, nextCol));
+        }
+    } else if (e.key === "ArrowRight") {
+        if ((e.target as HTMLInputElement).selectionStart === (e.target as HTMLInputElement).value.length) {
+            e.preventDefault();
+            nextCol = Math.min(columns - 1, colIndex + 1);
+            setSelectedCell(getCellKey(rowIndex, nextCol));
+        }
     }
-
-    setSelectedCell(getCellKey(nextRow, nextCol))
   }
 
   const applyFilters = (data: SpreadsheetData, filters: Filter[]) => {
@@ -187,10 +193,86 @@ const SpreadsheetUI = () => {
   }
 
   const handleColumnLabelChange = (colIndex: number, newLabel: string) => {
-    const newColumnLabels = [...columnLabels]
-    newColumnLabels[colIndex] = newLabel
-    setColumnLabels(newColumnLabels)
+    const oldLabel = columnLabels[colIndex];
+    const newColumnLabels = [...columnLabels];
+    newColumnLabels[colIndex] = newLabel;
+    setColumnLabels(newColumnLabels);
+
+    const newData = { ...data };
+    for (let i = 0; i < rows; i++) {
+      const oldKey = `${oldLabel}${i + 1}`;
+      const newKey = `${newLabel}${i + 1}`;
+      if (newData[oldKey]) {
+        newData[newKey] = newData[oldKey];
+        delete newData[oldKey];
+      }
+    }
+    setData(newData);
   }
+
+  const handleExportCSV = () => {
+    const csvData = [];
+    const header = columnLabels.slice(0, columns);
+    csvData.push(header);
+
+    for (let i = 0; i < rows; i++) {
+      const row = [];
+      for (let j = 0; j < columns; j++) {
+        const cellKey = getCellKey(i, j);
+        row.push(data[cellKey]?.value || "");
+      }
+      csvData.push(row);
+    }
+
+    const csv = Papa.unparse(csvData);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", "spreadsheet.csv");
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      try {
+        Papa.parse(file, {
+          header: false,
+          skipEmptyLines: true,
+          complete: (result) => {
+            const parsedData = result.data as string[][];
+            if (parsedData.length === 0) {
+              return;
+            }
+
+            const newColumnLabels = parsedData[0];
+            const newData: SpreadsheetData = {};
+            
+            for (let i = 1; i < parsedData.length; i++) {
+              for (let j = 0; j < newColumnLabels.length; j++) {
+                const cellKey = `${newColumnLabels[j]}${i}`;
+                newData[cellKey] = { value: parsedData[i][j] || "" };
+              }
+            }
+
+            setColumnLabels(newColumnLabels);
+            setColumns(newColumnLabels.length);
+            setRows(parsedData.length - 1);
+            setData(newData);
+          },
+          error: (error) => {
+            console.error("Error parsing CSV:", error);
+          },
+        });
+      } catch (error) {
+        console.error("Error handling CSV import:", error);
+      }
+    }
+  };
 
   const updateCell = (cellKey: string, value: string) => {
     setData(prev => ({
@@ -364,14 +446,26 @@ const SpreadsheetUI = () => {
               onApplyFilter={(filter) => setFilters(prev => [...prev, filter])}
               onClearFilters={() => setFilters([])}
             />
+            <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+              Import CSV
+            </Button>
+            <input
+              type="file"
+              ref={fileInputRef}
+              style={{ display: "none" }}
+              onChange={handleImportCSV}
+              accept=".csv"
+            />
+            <Button variant="outline" size="sm" onClick={handleExportCSV}>
+              Export CSV
+            </Button>
           </div>
           <div className="flex items-center gap-2">
-            <ModeToggle />
           </div>
         </div>
 
         {/* Spreadsheet Grid */}
-        <div className="flex-1 overflow-auto" onKeyDown={handleKeyDown}>
+        <div className="flex-1 overflow-auto">
           <div className="inline-block min-w-full">
             <table className="border-collapse">
               <thead>
@@ -459,8 +553,10 @@ const SpreadsheetUI = () => {
                           onClick={() => setSelectedCell(cellKey)}
                         >
                           <Input
+                            ref={(el) => {inputRefs.current[cellKey] = el}}
                             value={cellData?.value || ''}
                             onChange={(e) => updateCell(cellKey, e.target.value)}
+                            onKeyDown={(e) => handleCellKeyDown(e, cellKey)}
                             className={cn(
                               "border-0 h-full w-full rounded-none bg-transparent text-xs px-1 focus:ring-0 focus:outline-none",
                               cellData?.style?.bold && "font-bold",
@@ -657,7 +753,7 @@ const FilterDialog = ({
           </div>
           <div className="grid grid-cols-4 items-center gap-4">
             <Input
-              className="col-span-4"
+              className="col-span-4 text-black"
               value={filterValue}
               onChange={(e) => setFilterValue(e.target.value)}
               disabled={isValueDisabled}
