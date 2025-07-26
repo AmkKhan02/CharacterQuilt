@@ -74,12 +74,12 @@ async def execute_llm_request(request: LLMRequest):
 
         Your response must be a JSON object with two keys: 'message' and 'functions'.
         - 'message': A user-friendly message to be displayed in the chat.
-        - 'functions': A list of function calls to be executed on the spreadsheet.
+        - 'functions': A list of function calls to be executed on the spreadsheet. Do not include formulas like `=IF(...)` in the `update_cell` function. Instead, evaluate the condition and provide the final value, e.g., 'TRUE' or 'FALSE'.
 
         Example Response:
         {{
-          "message": "I have calculated the sum of column A and placed it in cell B1.",
-          "functions": ["sum_col('A')", "update_cell('B', 1, 'SUM_RESULT')"]
+          "message": "I have classified the individuals based on their program.",
+          "functions": ["add_col('IsEngineer')", "update_cell('IsEngineer', 1, 'FALSE')", "update_cell('IsEngineer', 2, 'FALSE')", "update_cell('IsEngineer', 3, 'TRUE')"]
         }}
         """
         print("Generated prompt for Gemini:\n", prompt)

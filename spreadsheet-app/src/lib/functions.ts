@@ -14,8 +14,13 @@ interface CellData {
     [key: string]: CellData;
   }
   
-  const getColumnIndex = (col: string): number => {
-    return col.toUpperCase().charCodeAt(0) - 65;
+  const getColumnIndex = (col: string, columnLabels: string[]): number => {
+    const index = columnLabels.indexOf(col);
+    if (index === -1) {
+      // Fallback for old behavior, can be removed later
+      return col.toUpperCase().charCodeAt(0) - 65;
+    }
+    return index;
   };
   
   const getColumnLabel = (index: number): string => {
@@ -121,9 +126,9 @@ interface CellData {
         if (typeof col !== 'string' || typeof row !== 'number' || typeof value === 'undefined') {
           throw new Error("Invalid arguments for update_cell. Expected: (column, row, value)");
         }
-        const colIndex = getColumnIndex(col);
+        const colIndex = getColumnIndex(col, newColumnLabels);
         const rowIndex = row - 1;
-        if (colIndex >= newColumns || rowIndex >= newRows) {
+        if (colIndex === -1 || colIndex >= newColumns || rowIndex >= newRows) {
           throw new Error("Cell is out of bounds.");
         }
         const cellKey = getCellKey(rowIndex, colIndex);
@@ -137,9 +142,9 @@ interface CellData {
         if (typeof col !== 'string' || typeof row !== 'number') {
           throw new Error("Invalid arguments for remove_cell. Expected: (column, row)");
         }
-        const colIndex = getColumnIndex(col);
+        const colIndex = getColumnIndex(col, newColumnLabels);
         const rowIndex = row - 1;
-        if (colIndex >= newColumns || rowIndex >= newRows) {
+        if (colIndex === -1 || colIndex >= newColumns || rowIndex >= newRows) {
           throw new Error("Cell is out of bounds.");
         }
         const cellKey = getCellKey(rowIndex, colIndex);
@@ -155,9 +160,9 @@ interface CellData {
         if (typeof col !== 'string' || typeof row !== 'number') {
           throw new Error("Invalid arguments for get_cell. Expected: (column, row)");
         }
-        const colIndex = getColumnIndex(col);
+        const colIndex = getColumnIndex(col, newColumnLabels);
         const rowIndex = row - 1;
-        if (colIndex >= newColumns || rowIndex >= newRows) {
+        if (colIndex === -1 || colIndex >= newColumns || rowIndex >= newRows) {
           throw new Error("Cell is out of bounds.");
         }
         const cellKey = getCellKey(rowIndex, colIndex);
@@ -174,8 +179,8 @@ interface CellData {
         if (typeof col !== 'string') {
           throw new Error(`Invalid arguments for ${functionName}. Expected: (column)`);
         }
-        const colIndex = getColumnIndex(col);
-        if (colIndex >= newColumns) {
+        const colIndex = getColumnIndex(col, newColumnLabels);
+        if (colIndex === -1 || colIndex >= newColumns) {
           throw new Error("Column is out of bounds.");
         }
         const values = [];
@@ -202,9 +207,16 @@ interface CellData {
       }
   
       case 'add_col': {
+        const [colName] = args;
+        if (typeof colName !== 'string' || colName.trim() === '') {
+          throw new Error("Invalid argument for add_col. Expected: (columnName)");
+        }
+        if (newColumnLabels.includes(colName)) {
+          throw new Error(`Column "${colName}" already exists.`);
+        }
         newColumns += 1;
-        newColumnLabels.push(getColumnLabel(newColumns - 1));
-        result = `Column added.`;
+        newColumnLabels.push(colName);
+        result = `Column '${colName}' added.`;
         break;
       }
   
@@ -213,8 +225,8 @@ interface CellData {
         if (typeof col !== 'string') {
           throw new Error("Invalid arguments for del_col. Expected: (column)");
         }
-        const colIndex = getColumnIndex(col);
-        if (colIndex >= newColumns) {
+        const colIndex = getColumnIndex(col, newColumnLabels);
+        if (colIndex === -1 || colIndex >= newColumns) {
           throw new Error("Column is out of bounds.");
         }
   
@@ -318,9 +330,9 @@ interface CellData {
         if (typeof startCol !== 'string' || typeof startRow !== 'number' || typeof endCol !== 'string' || typeof endRow !== 'number') {
           throw new Error(`Invalid arguments for ${functionName}. Expected: (startCol, startRow, endCol, endRow)`);
         }
-        const startColIndex = getColumnIndex(startCol);
+        const startColIndex = getColumnIndex(startCol, newColumnLabels);
         const startRowIndex = startRow - 1;
-        const endColIndex = getColumnIndex(endCol);
+        const endColIndex = getColumnIndex(endCol, newColumnLabels);
         const endRowIndex = endRow - 1;
   
         if (startColIndex >= newColumns || startRowIndex >= newRows || endColIndex >= newColumns || endRowIndex >= newRows) {

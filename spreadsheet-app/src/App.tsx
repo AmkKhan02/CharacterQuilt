@@ -197,8 +197,9 @@ const SpreadsheetUI = () => {
   }
 
   const handleCellKeyDown = (e: React.KeyboardEvent, cellKey: string) => {
-    const [colChar, rowStr] = cellKey.match(/^([A-Z]+)(\d+)$/)?.slice(1) || []
-    if (!colChar || !rowStr) return;
+    const match = cellKey.match(/^([a-zA-Z]+)(\d+)$/);
+    if (!match) return;
+    const [, colChar, rowStr] = match;
 
     const rowIndex = parseInt(rowStr) - 1
     const colIndex = columnLabels.indexOf(colChar)
@@ -412,6 +413,45 @@ const SpreadsheetUI = () => {
       setGridState(prev => ({ ...prev, columns: prev.columns - 1 }));
     }
   }
+
+  const moveColumn = (fromIndex: number, direction: 'left' | 'right') => {
+    setGridState(prev => {
+      const toIndex = direction === 'left' ? fromIndex - 1 : fromIndex + 1;
+
+      if (toIndex < 0 || toIndex >= prev.columns) {
+          return prev;
+      }
+
+      const newColumnLabels = [...prev.columnLabels];
+      const [movedItem] = newColumnLabels.splice(fromIndex, 1);
+      newColumnLabels.splice(toIndex, 0, movedItem);
+
+      const newData: SpreadsheetData = {};
+      for (let i = 0; i < prev.rows; i++) {
+          const rowData: (CellData | undefined)[] = [];
+          for (let j = 0; j < prev.columns; j++) {
+              const oldKey = `${prev.columnLabels[j]}${i + 1}`;
+              rowData.push(prev.data[oldKey]);
+          }
+
+          const [movedData] = rowData.splice(fromIndex, 1);
+          rowData.splice(toIndex, 0, movedData);
+
+          for (let j = 0; j < newColumnLabels.length; j++) {
+              const newKey = `${newColumnLabels[j]}${i + 1}`;
+              if (rowData[j]) {
+                  newData[newKey] = rowData[j] as CellData;
+              }
+          }
+      }
+
+      return {
+          ...prev,
+          columnLabels: newColumnLabels,
+          data: newData,
+      };
+    });
+  };
 
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || !apiKey.trim()) return
@@ -631,6 +671,12 @@ const SpreadsheetUI = () => {
                             <DropdownMenuItem onClick={() => insertColumn(colIndex + 1)}>
                               Insert Right
                             </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => moveColumn(colIndex, 'left')} disabled={colIndex === 0}>
+                              Move Left
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => moveColumn(colIndex, 'right')} disabled={colIndex === columns - 1}>
+                              Move Right
+                            </DropdownMenuItem>
                             <DropdownMenuItem onSelect={() => setEditingColumn(colIndex)}>
                               Rename
                             </DropdownMenuItem>
@@ -763,6 +809,7 @@ const SpreadsheetUI = () => {
             <div className="p-4 border-t border-border">
               <div className="flex flex-col gap-2">
                 <Input
+                  type="password"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                   placeholder="Enter your Gemini API Key"
