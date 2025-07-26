@@ -45,6 +45,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import Papa from "papaparse"
+import { io, Socket } from "socket.io-client"
 
 interface CellData {
   value: string
@@ -85,15 +86,16 @@ const getColumnLabel = (index: number): string => {
 }
 
 const SpreadsheetUI = () => {
-  const [data, setData] = useState<SpreadsheetData>({})
+  const [gridState, setGridState] = useState({
+    data: {} as SpreadsheetData,
+    rows: 20,
+    columns: 10,
+    columnLabels: Array.from({ length: 10 }, (_, i) => getColumnLabel(i)),
+  });
+  const { data, rows, columns, columnLabels } = gridState;
   const [selectedCell, setSelectedCell] = useState<string | null>(null)
   const [editingColumn, setEditingColumn] = useState<number | null>(null)
   const [selectedColumn, setSelectedColumn] = useState<number | null>(null)
-  const [rows, setRows] = useState(20)
-  const [columns, setColumns] = useState(10)
-  const [columnLabels, setColumnLabels] = useState<string[]>(
-    Array.from({ length: 10 }, (_, i) => getColumnLabel(i))
-  )
   const [filters, setFilters] = useState<Filter[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   const [messages, setMessages] = useState<Message[]>([
@@ -105,37 +107,74 @@ const SpreadsheetUI = () => {
     }
   ])
   const [inputMessage, setInputMessage] = useState('')
+  const [apiKey, setApiKey] = useState('')
   const [isChatOpen, setIsChatOpen] = useState(true)
   const [functionResult, setFunctionResult] = useState<string | null>(null)
   const [functionError, setFunctionError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const socketRef = useRef<Socket | null>(null)
 
-  const handleExecuteFunction = (command: string) => {
+  const handleExecuteFunction = useCallback((command: string) => {
+    console.log("Executing command:", command);
     try {
-      const { newData, newRows, newColumns, newColumnLabels, result } = executeFunction(
-        command,
-        data,
-        rows,
-        columns,
-        columnLabels
-      )
-      setData(newData)
-      setRows(newRows)
-      setColumns(newColumns)
-      setColumnLabels(newColumnLabels)
-      setFunctionResult(result)
-      setFunctionError(null)
+      setGridState(currentState => {
+        console.log("Current state before execution:", currentState);
+        const { newData, newRows, newColumns, newColumnLabels, result } = executeFunction(
+          command,
+          currentState.data,
+          currentState.rows,
+          currentState.columns,
+          currentState.columnLabels
+        );
+        console.log("New state after execution:", { newData, newRows, newColumns, newColumnLabels });
+        setFunctionResult(result);
+        setFunctionError(null);
+
+        if (socketRef.current && result) {
+          socketRef.current.emit('function_result', { result });
+          console.log("Sent result back to backend:", result);
+        }
+
+        return {
+          data: newData,
+          rows: newRows,
+          columns: newColumns,
+          columnLabels: newColumnLabels,
+        };
+      });
     } catch (error) {
       if (error instanceof Error) {
-        setFunctionError(error.message)
+        setFunctionError(error.message);
       } else {
-        setFunctionError("An unknown error occurred.")
+        setFunctionError("An unknown error occurred.");
       }
-      setFunctionResult(null)
+      setFunctionResult(null);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    socketRef.current = io("http://localhost:8000");
+
+    socketRef.current.on('connect', () => {
+      console.log('Connected to WebSocket');
+    });
+
+    socketRef.current.on('execute_command', (data) => {
+      console.log('Command received from backend:', data.command);
+      handleExecuteFunction(data.command);
+    });
+
+    socketRef.current.on('disconnect', () => {
+      console.log('Disconnected from WebSocket');
+    });
+
+    const socket = socketRef.current;
+    return () => {
+      socket.disconnect();
+    };
+  }, [handleExecuteFunction]);
 
   useEffect(() => {
     if (selectedCell && inputRefs.current[selectedCell]) {
@@ -223,21 +262,22 @@ const SpreadsheetUI = () => {
   }
 
   const handleColumnLabelChange = (colIndex: number, newLabel: string) => {
-    const oldLabel = columnLabels[colIndex];
-    const newColumnLabels = [...columnLabels];
-    newColumnLabels[colIndex] = newLabel;
-    setColumnLabels(newColumnLabels);
+    setGridState(currentState => {
+      const oldLabel = currentState.columnLabels[colIndex];
+      const newColumnLabels = [...currentState.columnLabels];
+      newColumnLabels[colIndex] = newLabel;
 
-    const newData = { ...data };
-    for (let i = 0; i < rows; i++) {
-      const oldKey = `${oldLabel}${i + 1}`;
-      const newKey = `${newLabel}${i + 1}`;
-      if (newData[oldKey]) {
-        newData[newKey] = newData[oldKey];
-        delete newData[oldKey];
+      const newData = { ...currentState.data };
+      for (let i = 0; i < currentState.rows; i++) {
+        const oldKey = `${oldLabel}${i + 1}`;
+        const newKey = `${newLabel}${i + 1}`;
+        if (newData[oldKey]) {
+          newData[newKey] = newData[oldKey];
+          delete newData[oldKey];
+        }
       }
-    }
-    setData(newData);
+      return { ...currentState, data: newData, columnLabels: newColumnLabels };
+    });
   }
 
   const handleExportCSV = () => {
@@ -289,10 +329,12 @@ const SpreadsheetUI = () => {
               }
             }
 
-            setColumnLabels(newColumnLabels);
-            setColumns(newColumnLabels.length);
-            setRows(parsedData.length - 1);
-            setData(newData);
+            setGridState({
+              columnLabels: newColumnLabels,
+              columns: newColumnLabels.length,
+              rows: parsedData.length - 1,
+              data: newData,
+            });
           },
           error: (error) => {
             console.error("Error parsing CSV:", error);
@@ -305,58 +347,72 @@ const SpreadsheetUI = () => {
   };
 
   const updateCell = (cellKey: string, value: string) => {
-    setData(prev => ({
+    setGridState(prev => ({
       ...prev,
-      [cellKey]: {
-        ...prev[cellKey],
-        value
+      data: {
+        ...prev.data,
+        [cellKey]: {
+          ...prev.data[cellKey],
+          value
+        }
       }
-    }))
+    }));
   }
 
   const updateCellStyle = (cellKey: string, style: Partial<CellData['style']>) => {
-    setData(prev => ({
+    setGridState(prev => ({
       ...prev,
-      [cellKey]: {
-        ...prev[cellKey],
-        style: {
-          ...prev[cellKey]?.style,
-          ...style
+      data: {
+        ...prev.data,
+        [cellKey]: {
+          ...prev.data[cellKey],
+          style: {
+            ...prev.data[cellKey]?.style,
+            ...style
+          }
         }
       }
-    }))
+    }));
   }
 
   const addRow = () => {
-    setRows(prev => prev + 1)
+    setGridState(prev => ({ ...prev, rows: prev.rows + 1 }));
   }
 
   const addColumn = () => {
-    setColumns(prev => prev + 1)
-    setColumnLabels(prev => [...prev, getColumnLabel(columns)])
+    setGridState(prev => ({
+      ...prev,
+      columns: prev.columns + 1,
+      columnLabels: [...prev.columnLabels, getColumnLabel(prev.columns)]
+    }));
   }
 
   const insertColumn = (index: number) => {
-    const newColumnLabels = [...columnLabels]
-    newColumnLabels.splice(index, 0, getColumnLabel(columns))
-    setColumnLabels(newColumnLabels)
-    setColumns(prev => prev + 1)
+    setGridState(prev => {
+      const newColumnLabels = [...prev.columnLabels];
+      newColumnLabels.splice(index, 0, getColumnLabel(prev.columns));
+      return {
+        ...prev,
+        columns: prev.columns + 1,
+        columnLabels: newColumnLabels,
+      };
+    });
   }
 
   const removeRow = () => {
     if (rows > 1) {
-      setRows(prev => prev - 1)
+      setGridState(prev => ({ ...prev, rows: prev.rows - 1 }));
     }
   }
 
   const removeColumn = () => {
     if (columns > 1) {
-      setColumns(prev => prev - 1)
+      setGridState(prev => ({ ...prev, columns: prev.columns - 1 }));
     }
   }
 
-  const handleSendMessage = () => {
-    if (!inputMessage.trim()) return
+  const handleSendMessage = async () => {
+    if (!inputMessage.trim() || !apiKey.trim()) return
 
     const newMessage: Message = {
       id: Date.now().toString(),
@@ -368,16 +424,47 @@ const SpreadsheetUI = () => {
     setMessages(prev => [...prev, newMessage])
     setInputMessage('')
 
-    // Simulate assistant response
-    setTimeout(() => {
-      const assistantMessage: Message = {
+    try {
+      const response = await fetch("http://localhost:8000/execute_llm_request", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          data: data,
+          message: inputMessage,
+          apiKey: apiKey,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.status === "success") {
+        const assistantMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          content: result.message,
+          sender: 'assistant',
+          timestamp: new Date()
+        }
+        setMessages(prev => [...prev, assistantMessage])
+      } else {
+        const errorMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          content: `Error: ${result.message}`,
+          sender: 'assistant',
+          timestamp: new Date()
+        }
+        setMessages(prev => [...prev, errorMessage])
+      }
+    } catch (error) {
+      const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
-        content: `I understand you said: "${inputMessage}". I can help you with spreadsheet operations, data analysis, or formula creation. What would you like to do?`,
+        content: "An error occurred while communicating with the backend.",
         sender: 'assistant',
         timestamp: new Date()
       }
-      setMessages(prev => [...prev, assistantMessage])
-    }, 1000)
+      setMessages(prev => [...prev, errorMessage])
+    }
   }
 
   const formatTime = (date: Date) => {
@@ -672,32 +759,40 @@ const SpreadsheetUI = () => {
 
             {/* Chat Input */}
             <div className="p-4 border-t border-border">
-              <div className="flex items-center gap-2">
-                <div className="flex-1 relative">
-                  <Input
-                    value={inputMessage}
-                    onChange={(e) => setInputMessage(e.target.value)}
-                    placeholder="Ask about your spreadsheet..."
-                    className="pr-20"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault()
-                        handleSendMessage()
-                      }
-                    }}
-                  />
-                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
-                      <Smile className="w-4 h-4" />
-                    </Button>
-                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
-                      <Paperclip className="w-4 h-4" />
-                    </Button>
+              <div className="flex flex-col gap-2">
+                <Input
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="Enter your Gemini API Key"
+                  className="text-xs"
+                />
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 relative">
+                    <Input
+                      value={inputMessage}
+                      onChange={(e) => setInputMessage(e.target.value)}
+                      placeholder="Ask about your spreadsheet..."
+                      className="pr-20"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault()
+                          handleSendMessage()
+                        }
+                      }}
+                    />
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                      <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
+                        <Smile className="w-4 h-4" />
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
+                        <Paperclip className="w-4 h-4" />
+                      </Button>
+                    </div>
                   </div>
+                  <Button onClick={handleSendMessage} size="sm">
+                    <Send className="w-4 h-4" />
+                  </Button>
                 </div>
-                <Button onClick={handleSendMessage} size="sm">
-                  <Send className="w-4 h-4" />
-                </Button>
               </div>
             </div>
           </div>
