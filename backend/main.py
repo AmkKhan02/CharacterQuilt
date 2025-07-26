@@ -6,22 +6,26 @@ import google.generativeai as genai
 import json
 
 # Create a Socket.IO asynchronous server
-sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
+sio = socketio.AsyncServer(
+    async_mode='asgi',
+    # THIS IS THE CRUCIAL LINE FOR SOCKET.IO CORS
+    cors_allowed_origins=["http://localhost:5173"]
+)
 
 # Create a FastAPI app instance
 app = FastAPI()
 
+# Add CORS middleware for FastAPI routes (good to keep for your /execute_llm_request endpoint)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Mount the Socket.IO server on the FastAPI app
-sio_app = socketio.ASGIApp(sio)
-app.mount('/socket.io', sio_app)
+# Combine FastAPI and Socket.IO
+sio_app = socketio.ASGIApp(sio, other_asgi_app=app)
 
 class LLMRequest(BaseModel):
     data: dict
@@ -116,4 +120,4 @@ async def handle_function_result(sid, data):
 
 if __name__ == '__main__':
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+    uvicorn.run(sio_app, host="0.0.0.0", port=8000, log_level="info")

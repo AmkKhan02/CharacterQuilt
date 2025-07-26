@@ -155,7 +155,9 @@ const SpreadsheetUI = () => {
   }, []);
 
   useEffect(() => {
-    socketRef.current = io("http://localhost:8000");
+    socketRef.current = io("http://localhost:8000", {
+      path: '/socket.io/'
+    });
 
     socketRef.current.on('connect', () => {
       console.log('Connected to WebSocket');
